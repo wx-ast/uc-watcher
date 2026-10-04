@@ -29,6 +29,65 @@ func installedApplicationURL() -> URL {
         .appendingPathComponent("Library/Application Support/UCWatchdog/UC Watchdog.app")
 }
 
+func installedMenuIsRunning() throws -> Bool {
+    let lock = defaultStateDirectory().appendingPathComponent("menu.lock")
+    let fd = open(lock.path, O_RDONLY | O_CLOEXEC)
+    guard fd >= 0 else {
+        if errno == ENOENT { return false }
+        throw WatchError.message("Cannot inspect installed menu lock")
+    }
+    defer { close(fd) }
+    if flock(fd, LOCK_EX | LOCK_NB) == 0 { return false }
+    guard errno == EWOULDBLOCK else { throw WatchError.message("Cannot inspect installed menu lock") }
+    let binary = installedApplicationURL().appendingPathComponent("Contents/MacOS/uc-watchdog")
+    return !(try ownProcesses(binary.path)).isEmpty
+}
+
+func openInstalledApplication(isRunning: () throws -> Bool = installedMenuIsRunning,
+                              launch: () throws -> Void = {
+                                  _ = try command("/usr/bin/open", ["-n", installedApplicationURL().path])
+                              },
+                              wait: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }) throws {
+    // Registering a login item can start the installed copy before we ask LaunchServices to open it.
+    if try isRunning() { return }
+    do { try launch() }
+    catch {
+        // A concurrent launch may finish after open reports Resource busy. Require the
+        // installed executable and its menu lock, rather than another copy with our bundle ID.
+        for delay in [0.0, 0.1, 0.2, 0.5, 1.0, 2.0] {
+            wait(delay)
+            if try isRunning() { return }
+        }
+        throw error
+    }
+}
+
+func installationLaunchSelfTest() throws {
+    var launches = 0
+    try openInstalledApplication(isRunning: { true }, launch: { launches += 1 }, wait: { _ in })
+    guard launches == 0 else { throw WatchError.message("Already-running installed app was launched again") }
+
+    try openInstalledApplication(isRunning: { false }, launch: { launches += 1 }, wait: { _ in })
+    guard launches == 1 else { throw WatchError.message("Stopped installed app was not launched") }
+
+    var checks = 0
+    let busy = WatchError.message("open: NSPOSIXErrorDomain Code=16 Resource busy")
+    try openInstalledApplication(isRunning: { checks += 1; return checks >= 4 }, launch: {
+        launches += 1
+        throw busy
+    }, wait: { _ in })
+    guard launches == 2, checks == 4 else { throw WatchError.message("Concurrent installed app launch failed") }
+
+    var waited = 0.0
+    var failure: String?
+    do {
+        try openInstalledApplication(isRunning: { false }, launch: { throw busy }, wait: { waited += $0 })
+    } catch { failure = String(describing: error) }
+    guard failure == busy.description, waited < 4 else {
+        throw WatchError.message("Launch failure was hidden or wait was not bounded")
+    }
+}
+
 func launchApplication(confirm: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }) throws {
     try requireApplicationBundle()
     let installed = installedApplicationURL()
@@ -51,7 +110,7 @@ func launchApplication(confirm: (NSAlert) -> NSApplication.ModalResponse = { $0.
     let response = confirm(alert)
     do {
         if exists && response == .alertFirstButtonReturn {
-            _ = try command("/usr/bin/open", ["-n", installed.path])
+            try openInstalledApplication()
         } else if (!exists && response == .alertFirstButtonReturn) || (exists && response == .alertSecondButtonReturn) {
             var arguments: [String] = []
             if exists {

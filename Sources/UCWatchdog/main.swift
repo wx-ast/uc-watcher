@@ -273,7 +273,7 @@ func makeBundle(at bundle: URL) throws {
     let info: [String: Any] = ["CFBundleIdentifier": label, "CFBundleName": "UC Watchdog",
                               "CFBundleDisplayName": "UC Watchdog", "CFBundleExecutable": "uc-watchdog",
                               "CFBundleIconFile": "AppIcon.icns",
-                              "CFBundlePackageType": "APPL", "CFBundleVersion": "8",
+                              "CFBundlePackageType": "APPL", "CFBundleVersion": "9",
                               "CFBundleShortVersionString": "1.0", "LSMinimumSystemVersion": "13.0",
                               "UCWatchdogAuthor": "wx-ast",
                               "UCWatchdogSourceURL": "https://github.com/wx-ast/uc-watcher",
@@ -392,12 +392,13 @@ func manage(_ action: String, _ arguments: [String]) throws {
     if loginEnabled { print(try command(binary.path, ["autostart", "on"])) }
     // A distributed copy may still be running with the same bundle ID.
     // Force opening the installed path; the menu lock prevents duplicate instances.
-    _ = try command("/usr/bin/open", ["-n", bundle.path])
+    try openInstalledApplication()
     print("Installed UC Watchdog menu bar app; mode: \(arguments.contains("--dry-run") ? "observation" : "automatic recovery")")
     print("Log: \(logs.appendingPathComponent("watchdog.log").path)")
 }
 
 func selfTest() throws {
+    try installationLaunchSelfTest()
     var calls = 0
     let guardState = Guard(peer: "3047DD83", log: { _ in }) { calls += 1 }
     func event(_ kind: String, _ now: Double) { guardState.event("IDS 3047DD83: \(kind)", now: now) }
@@ -503,7 +504,7 @@ func selfTest() throws {
           changedPeer.lastAttempt == originalPeer.lastAttempt else {
         throw WatchError.message("Peer change must preserve rate limits without inheriting another Mac's incident")
     }
-    print("23 self-tests passed; no service signals sent")
+    print("Self-tests passed, including installation launch races; no service signals sent")
 }
 
 func previewNotification(_ arguments: [String]) throws {
