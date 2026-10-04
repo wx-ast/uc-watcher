@@ -24,17 +24,24 @@ final class RecoveryNotice: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    static func content(for incident: RecoveryIncident, preview: Bool = false) -> UNMutableNotificationContent? {
+    static func content(for incident: RecoveryIncident, preview: Bool = false,
+                        language: AppLanguage = .current) -> UNMutableNotificationContent? {
         guard let end = incident.restoredAt else { return nil }
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .russian ? "ru_RU" : "en_US")
         formatter.dateFormat = "dd.MM HH:mm:ss"
         let seconds = Int(max(0, end - incident.startedAt).rounded())
         let content = UNMutableNotificationContent()
-        content.title = preview ? "Проверка уведомления" : "Связь восстановлена"
-        content.body = "Обрыв: \(formatter.string(from: Date(timeIntervalSince1970: incident.startedAt)))\n"
-            + "Восстановление: \(formatter.string(from: Date(timeIntervalSince1970: end)))\n"
-            + "Без связи: \(seconds) с. "
-            + (incident.restartAttempted ? "Watchdog запускал восстановление." : "Связь вернулась без перезапуска watchdog.")
+        content.title = preview
+            ? localized("Notification Test", "Проверка уведомления", language: language)
+            : localized("Connection Restored", "Связь восстановлена", language: language)
+        let start = formatter.string(from: Date(timeIntervalSince1970: incident.startedAt))
+        let restored = formatter.string(from: Date(timeIntervalSince1970: end))
+        content.body = localized("Disconnected: \(start)\nRestored: \(restored)\nOffline: \(seconds) s. ",
+                                 "Обрыв: \(start)\nВосстановление: \(restored)\nБез связи: \(seconds) с. ", language: language)
+            + (incident.restartAttempted
+                ? localized("Watchdog attempted recovery.", "Watchdog запускал восстановление.", language: language)
+                : localized("The connection returned without a watchdog restart.", "Связь вернулась без перезапуска watchdog.", language: language))
         content.threadIdentifier = preview ? "preview" : "recovery"
         return content
     }

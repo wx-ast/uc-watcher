@@ -247,6 +247,15 @@ func monitor(_ arguments: [String]) throws {
 
 func makeBundle(at bundle: URL) throws {
     let fm = FileManager.default
+    // A distributed app must retain its signature, resources and stapled ticket.
+    // Rebuilding it here would replace Developer ID with an ad-hoc signature.
+    let runningBundle = Bundle.main.bundleURL
+    if runningBundle.pathExtension == "app", Bundle.main.bundleIdentifier == label {
+        _ = try command("/usr/bin/codesign", ["--verify", "--strict", runningBundle.path])
+        try fm.copyItem(at: runningBundle, to: bundle)
+        _ = try command("/usr/bin/codesign", ["--verify", "--strict", bundle.path])
+        return
+    }
     let contents = bundle.appendingPathComponent("Contents")
     let executable = contents.appendingPathComponent("MacOS/uc-watchdog")
     try fm.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -441,10 +450,21 @@ func selfTest() throws {
     guard RecoveryNotice.content(for: RecoveryIncident(startedAt: 2000, restartAttempted: true)) == nil else {
         throw WatchError.message("Unconfirmed restoration must not produce notification content")
     }
-    guard let content = RecoveryNotice.content(for: notices[0]), content.title == "Связь восстановлена",
+    guard let content = RecoveryNotice.content(for: notices[0], language: .russian), content.title == "Связь восстановлена",
           content.body.contains("27 с"), content.body.contains("Watchdog запускал восстановление."),
-          RecoveryNotice.content(for: notices[0], preview: true)?.title == "Проверка уведомления" else {
+          RecoveryNotice.content(for: notices[0], preview: true, language: .russian)?.title == "Проверка уведомления" else {
         throw WatchError.message("Native notification content failed")
+    }
+    guard AppLanguage.resolve(nil) == .english, AppLanguage.resolve("unsupported") == .english,
+          AppLanguage.resolve("ru") == .russian,
+          let english = RecoveryNotice.content(for: notices[0], language: .english),
+          english.title == "Connection Restored", english.body.contains("27 s."),
+          english.body.contains("Watchdog attempted recovery."),
+          RecoveryNotice.content(for: notices[0], preview: true, language: .english)?.title == "Notification Test",
+          let automatic = RecoveryNotice.content(for: RecoveryIncident(startedAt: 2000, restoredAt: 2027,
+                                                                        restartAttempted: false), language: .english),
+          automatic.body.contains("without a watchdog restart") else {
+        throw WatchError.message("Language fallback/English notification content failed")
     }
     let configuration = WatchConfiguration(peer: "3047DD83", dryRun: true)
     try configuration.save(to: directory)

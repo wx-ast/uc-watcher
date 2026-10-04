@@ -5,7 +5,7 @@ struct PeerCandidate: Equatable {
     var name: String?
     var model: String?
     var lastSeen: String
-    var title: String { "\(name ?? model ?? "Устройство Universal Control") — \(prefix)" }
+    var title: String { "\(name ?? model ?? localized("Universal Control device", "Устройство Universal Control")) — \(prefix)" }
 }
 
 struct PeerCollector {
@@ -77,7 +77,7 @@ func discoverPeers() throws -> [PeerCandidate] {
     if !pending.isEmpty { collector.line(pending) }
     process.waitUntilExit()
     guard process.terminationStatus == 0 else {
-        throw WatchError.message("Не удалось прочитать журнал Universal Control за последние сутки. \(diagnostics.prefix(2000))")
+        throw WatchError.message(localized("Could not read the Universal Control log for the past 24 hours. \(diagnostics.prefix(2000))", "Не удалось прочитать журнал Universal Control за последние сутки. \(diagnostics.prefix(2000))"))
     }
     return collector.candidates
 }
@@ -92,9 +92,9 @@ private final class DiscoveryResult {
 private func scanWithProgress(scan: @escaping () throws -> [PeerCandidate] = discoverPeers) throws -> [PeerCandidate]? {
     let result = DiscoveryResult()
     let alert = NSAlert()
-    alert.messageText = "Поиск устройств Universal Control…"
-    alert.informativeText = "Читаем события за последние сутки. Это может занять несколько секунд."
-    alert.addButton(withTitle: "Отмена")
+    alert.messageText = localized("Finding Universal Control Devices…", "Поиск устройств Universal Control…")
+    alert.informativeText = localized("Reading events from the past 24 hours. This may take a few seconds.", "Читаем события за последние сутки. Это может занять несколько секунд.")
+    alert.addButton(withTitle: localized("Cancel", "Отмена"))
     let spinner = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
     spinner.style = .spinning; spinner.startAnimation(nil); alert.accessoryView = spinner
     DispatchQueue.global(qos: .userInitiated).async { result.set(Result { try scan() }) }
@@ -122,17 +122,17 @@ func choosePeer(scan: () throws -> [PeerCandidate]? = { try scanWithProgress() }
     while true {
         guard let candidates = try scan() else { return nil }
         let alert = NSAlert()
-        alert.messageText = candidates.isEmpty ? "Устройства не найдены" : "Какой Mac отслеживать?"
+        alert.messageText = candidates.isEmpty ? localized("No Devices Found", "Устройства не найдены") : localized("Which Mac Should Be Monitored?", "Какой Mac отслеживать?")
         alert.informativeText = candidates.isEmpty
-            ? "Включите Universal Control на обоих Mac, поднесите их ближе и попробуйте перевести указатель на другой экран. Затем обновите список."
-            : "Выберите Mac, связь с которым нужно восстанавливать. Список составлен по событиям за последние сутки; устройство сейчас может быть недоступно."
+            ? localized("Enable Universal Control on both Macs, bring them closer, and try moving the pointer to the other screen. Then refresh the list.", "Включите Universal Control на обоих Mac, поднесите их ближе и попробуйте перевести указатель на другой экран. Затем обновите список.")
+            : localized("Select the Mac whose connection should be restored. This list uses events from the past 24 hours; the device may currently be unavailable.", "Выберите Mac, связь с которым нужно восстанавливать. Список составлен по событиям за последние сутки; устройство сейчас может быть недоступно.")
         if candidates.isEmpty {
-            alert.addButton(withTitle: "Обновить список"); alert.addButton(withTitle: "Отмена")
+            alert.addButton(withTitle: localized("Refresh List", "Обновить список")); alert.addButton(withTitle: localized("Cancel", "Отмена"))
             guard confirm(alert) == .alertFirstButtonReturn else { return nil }
         } else {
-            alert.addButton(withTitle: "Установить"); alert.addButton(withTitle: "Обновить список"); alert.addButton(withTitle: "Отмена")
+            alert.addButton(withTitle: localized("Install", "Установить")); alert.addButton(withTitle: localized("Refresh List", "Обновить список")); alert.addButton(withTitle: localized("Cancel", "Отмена"))
             let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 440, height: 28), pullsDown: false)
-            popup.addItem(withTitle: "Выберите устройство…")
+            popup.addItem(withTitle: localized("Select a Device…", "Выберите устройство…"))
             for candidate in candidates { popup.addItem(withTitle: candidate.title); popup.lastItem?.representedObject = candidate.prefix }
             let selection = PeerSelection(popup: popup, button: alert.buttons[0])
             popup.target = selection; popup.action = #selector(PeerSelection.changed)

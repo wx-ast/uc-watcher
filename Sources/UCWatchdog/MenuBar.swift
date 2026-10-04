@@ -40,13 +40,13 @@ func launchApplication(confirm: (NSAlert) -> NSApplication.ModalResponse = { $0.
     NSApplication.shared.setActivationPolicy(.accessory)
     let exists = FileManager.default.fileExists(atPath: installed.path)
     let alert = NSAlert()
-    alert.messageText = exists ? "Universal Control Watcher уже установлен" : "Установить Universal Control Watcher?"
+    alert.messageText = exists ? localized("Universal Control Watcher is already installed", "Universal Control Watcher уже установлен") : localized("Install Universal Control Watcher?", "Установить Universal Control Watcher?")
     alert.informativeText = exists
-        ? "Можно открыть установленное приложение или заменить его этой копией. История и журналы сохранятся."
-        : "Приложение будет установлено для текущего пользователя и запущено. Автозапуск при входе можно отключить в меню."
-    alert.addButton(withTitle: exists ? "Открыть установленное" : "Установить")
-    if exists { alert.addButton(withTitle: "Обновить") }
-    alert.addButton(withTitle: "Отмена")
+        ? localized("Open the installed application or replace it with this copy. History and logs will be retained.", "Можно открыть установленное приложение или заменить его этой копией. История и журналы сохранятся.")
+        : localized("The application will be installed for the current user and started. You can disable launch at login in the menu.", "Приложение будет установлено для текущего пользователя и запущено. Автозапуск при входе можно отключить в меню.")
+    alert.addButton(withTitle: exists ? localized("Open Installed App", "Открыть установленное") : localized("Install", "Установить"))
+    if exists { alert.addButton(withTitle: localized("Update", "Обновить")) }
+    alert.addButton(withTitle: localized("Cancel", "Отмена"))
     NSApplication.shared.activate(ignoringOtherApps: true)
     let response = confirm(alert)
     do {
@@ -66,7 +66,7 @@ func launchApplication(confirm: (NSAlert) -> NSApplication.ModalResponse = { $0.
         }
     } catch {
         let failure = NSAlert()
-        failure.messageText = "Не удалось запустить приложение"
+        failure.messageText = localized("Could not start the application", "Не удалось запустить приложение")
         failure.informativeText = String(describing: error)
         failure.runModal()
         throw error
@@ -164,7 +164,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let item: NSStatusItem
     let heading = NSMenuItem(title: "Universal Control Watcher", action: nil, keyEquivalent: "")
     let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let login = NSMenuItem(title: "Запускать при входе", action: #selector(toggleAutostart), keyEquivalent: "")
+    let login = NSMenuItem(title: localized("Launch at Login", "Запускать при входе"), action: #selector(toggleAutostart), keyEquivalent: "")
     var timer: Timer?
 
     init(supervisor: MonitorSupervisor, logger: Logger) {
@@ -175,6 +175,12 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         image?.isTemplate = true
         item.button?.image = image
         item.button?.toolTip = "Universal Control Watcher"
+        rebuildMenu()
+    }
+
+    private func rebuildMenu() {
+        item.menu?.removeAllItems()
+        login.title = localized("Launch at Login", "Запускать при входе")
         let menu = NSMenu()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -184,18 +190,31 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(status)
         menu.addItem(.separator())
         for entry in [login,
-                      NSMenuItem(title: "Открыть журнал", action: #selector(openLog), keyEquivalent: ""),
-                      NSMenuItem(title: "Показать приложение в Finder", action: #selector(revealApp), keyEquivalent: ""),
-                      NSMenuItem(title: "Настройки объектов входа…", action: #selector(openLoginSettings), keyEquivalent: "")] {
+                      NSMenuItem(title: localized("Open Log", "Открыть журнал"), action: #selector(openLog), keyEquivalent: ""),
+                      NSMenuItem(title: localized("Show App in Finder", "Показать приложение в Finder"), action: #selector(revealApp), keyEquivalent: ""),
+                      NSMenuItem(title: localized("Login Items Settings…", "Настройки объектов входа…"), action: #selector(openLoginSettings), keyEquivalent: "")] {
             entry.target = self
             menu.addItem(entry)
         }
+        let language = NSMenuItem(title: localized("Language", "Язык"), action: nil, keyEquivalent: "")
+        let languages = NSMenu()
+        languages.autoenablesItems = false
+        for value in AppLanguage.allCases {
+            let entry = NSMenuItem(title: value == .english ? "English" : "Русский",
+                                   action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            entry.representedObject = value.rawValue
+            entry.state = value == AppLanguage.current ? .on : .off
+            entry.target = self
+            languages.addItem(entry)
+        }
+        language.submenu = languages
+        menu.addItem(language)
         menu.addItem(.separator())
-        let about = NSMenuItem(title: "О программе…", action: #selector(showAbout), keyEquivalent: "")
+        let about = NSMenuItem(title: localized("About…", "О программе…"), action: #selector(showAbout), keyEquivalent: "")
         about.target = self; menu.addItem(about)
-        let uninstall = NSMenuItem(title: "Удалить приложение…", action: #selector(uninstall), keyEquivalent: "")
+        let uninstall = NSMenuItem(title: localized("Uninstall App…", "Удалить приложение…"), action: #selector(uninstall), keyEquivalent: "")
         uninstall.target = self; menu.addItem(uninstall)
-        let quit = NSMenuItem(title: "Остановить", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: localized("Stop", "Остановить"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self; menu.addItem(quit)
         item.menu = menu
         refresh()
@@ -210,14 +229,21 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func refresh() {
         status.title = supervisor.isRunning
-            ? (supervisor.configuration.dryRun ? "Только наблюдение" : "Активен")
-            : (supervisor.policy.wanted ? "Перезапускается…" : "Остановлен")
+            ? (supervisor.configuration.dryRun ? localized("Observation Only", "Только наблюдение") : localized("Active", "Активен"))
+            : (supervisor.policy.wanted ? localized("Restarting…", "Перезапускается…") : localized("Stopped", "Остановлен"))
         login.state = SMAppService.mainApp.status == .enabled ? .on
             : (SMAppService.mainApp.status == .requiresApproval ? .mixed : .off)
         item.button?.appearsDisabled = !supervisor.isRunning
     }
 
     func menuWillOpen(_ menu: NSMenu) { refresh() }
+
+    @objc func selectLanguage(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String,
+              let language = AppLanguage(rawValue: value) else { return }
+        AppLanguage.current = language
+        rebuildMenu()
+    }
 
     @objc func toggleAutostart() {
         do {
@@ -237,15 +263,15 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
 
     @objc func showAbout() {
-        let credits = NSMutableAttributedString(string: "Автоматическое восстановление Universal Control между Mac.",
+        let credits = NSMutableAttributedString(string: localized("Automatic Universal Control recovery between Macs.", "Автоматическое восстановление Universal Control между Mac."),
             attributes: [.font: NSFont.systemFont(ofSize: 12)])
         if let author = Bundle.main.object(forInfoDictionaryKey: "UCWatchdogAuthor") as? String, !author.isEmpty {
-            credits.append(NSAttributedString(string: "\n\nАвтор: \(author)",
+            credits.append(NSAttributedString(string: localized("\n\nAuthor: \(author)", "\n\nАвтор: \(author)"),
                 attributes: [.font: NSFont.systemFont(ofSize: 12)]))
         }
         if let source = Bundle.main.object(forInfoDictionaryKey: "UCWatchdogSourceURL") as? String,
            let url = URL(string: source), ["https", "http"].contains(url.scheme), url.host != nil {
-            credits.append(NSAttributedString(string: "\n\nИсходный код приложения",
+            credits.append(NSAttributedString(string: localized("\n\nApplication source code", "\n\nИсходный код приложения"),
                 attributes: [.link: url, .font: NSFont.systemFont(ofSize: 12)]))
         }
         NSApplication.shared.orderFrontStandardAboutPanel(options: [
@@ -256,10 +282,10 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func uninstall() {
         let alert = NSAlert()
-        alert.messageText = "Удалить UC Watchdog?"
-        alert.informativeText = "Монитор будет остановлен, приложение и автозапуск удалены. Журналы и история останутся."
-        alert.addButton(withTitle: "Удалить")
-        alert.addButton(withTitle: "Отмена")
+        alert.messageText = localized("Uninstall UC Watchdog?", "Удалить UC Watchdog?")
+        alert.informativeText = localized("The monitor will stop, and the application and login item will be removed. Logs and history will be retained.", "Монитор будет остановлен, приложение и автозапуск удалены. Журналы и история останутся.")
+        alert.addButton(withTitle: localized("Uninstall", "Удалить"))
+        alert.addButton(withTitle: localized("Cancel", "Отмена"))
         NSApplication.shared.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let wasRunning = supervisor.policy.wanted
@@ -284,7 +310,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showError(_ error: Error) {
         logger.write("Menu action failed: \(error)")
         let alert = NSAlert()
-        alert.messageText = "Не удалось выполнить действие"
+        alert.messageText = localized("Could not complete the action", "Не удалось выполнить действие")
         alert.informativeText = String(describing: error)
         NSApplication.shared.activate(ignoringOtherApps: true)
         alert.runModal()
@@ -328,7 +354,7 @@ func menuSelfTest() throws {
         let registration = SMAppService.mainApp.status
         var offeredCancellation = false
         try launchApplication { alert in
-            offeredCancellation = alert.buttons.last?.title == "Отмена"
+            offeredCancellation = alert.buttons.last?.title == localized("Cancel", "Отмена")
             return alert.buttons.count == 3 ? .alertThirdButtonReturn : .alertSecondButtonReturn
         }
         guard offeredCancellation, SMAppService.mainApp.status == registration else {
@@ -338,6 +364,13 @@ func menuSelfTest() throws {
     try peerPickerSelfTest()
     let supervisor = MonitorSupervisor(directory: directory, configuration: WatchConfiguration(dryRun: true), logger: logger)
     let controller = MenuBarController(supervisor: supervisor, logger: logger)
+    guard let languages = controller.item.menu?.item(withTitle: localized("Language", "Язык"))?.submenu,
+          languages.items.map({ $0.title }) == ["English", "Русский"],
+          languages.items.allSatisfy({ $0.action == #selector(MenuBarController.selectLanguage(_:)) }),
+          languages.items.filter({ $0.state == .on }).count == 1,
+          languages.items.first(where: { $0.state == .on })?.representedObject as? String == AppLanguage.current.rawValue else {
+        throw WatchError.message("Language menu selection failed")
+    }
     NSApplication.shared.delegate = controller
     func finish(_ error: String?) {
         supervisor.stop()
@@ -353,11 +386,11 @@ func menuSelfTest() throws {
     controller.run()
     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
         guard supervisor.isRunning,
-              controller.item.menu?.item(withTitle: "Остановить")?.action == #selector(MenuBarController.quit)
+              controller.item.menu?.item(withTitle: localized("Stop", "Остановить"))?.action == #selector(MenuBarController.quit)
             else { finish("Initial menu/monitor state"); return }
         supervisor.stop(); controller.refresh()
         guard !supervisor.isRunning, !supervisor.policy.wanted,
-              controller.status.title == "Остановлен" else { finish("Stop child"); return }
+              controller.status.title == localized("Stopped", "Остановлен") else { finish("Stop child"); return }
         supervisor.start(); controller.refresh()
         guard supervisor.isRunning else { finish("Resume action"); return }
         // Terminate only our dry-run child to simulate a crash.
