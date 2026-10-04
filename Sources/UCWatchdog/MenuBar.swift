@@ -58,6 +58,9 @@ func launchApplication(confirm: (NSAlert) -> NSApplication.ModalResponse = { $0.
                 let configuration = try WatchConfiguration.load(from: defaultStateDirectory())
                 arguments = ["--peer", configuration.peer]
                 if configuration.dryRun { arguments.append("--dry-run") }
+            } else {
+                guard let peer = try choosePeer() else { return }
+                arguments = ["--peer", peer]
             }
             try manage("install", arguments)
         }
@@ -332,6 +335,7 @@ func menuSelfTest() throws {
             throw WatchError.message("Startup cancellation changed autostart")
         }
     }
+    try peerPickerSelfTest()
     let supervisor = MonitorSupervisor(directory: directory, configuration: WatchConfiguration(dryRun: true), logger: logger)
     let controller = MenuBarController(supervisor: supervisor, logger: logger)
     NSApplication.shared.delegate = controller

@@ -71,14 +71,15 @@ final class Guard {
            let stored = value["attempts"] as? [Double] {
             attempts = stored.filter { $0.isFinite }
             lastAttempt = attempts.max() ?? -.infinity
-            if let incident = value["pendingIncident"], let data = try? JSONSerialization.data(withJSONObject: incident) {
+            if (value["peer"] as? String ?? peer) == peer,
+               let incident = value["pendingIncident"], let data = try? JSONSerialization.data(withJSONObject: incident) {
                 pendingIncident = try? JSONDecoder().decode(RecoveryIncident.self, from: data)
             }
         }
     }
     func saveHistory() throws {
         guard let path = history else { return }
-        var value: [String: Any] = ["attempts": attempts]
+        var value: [String: Any] = ["attempts": attempts, "peer": peer]
         if let incident = pendingIncident {
             value["pendingIncident"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(incident))
         }
@@ -263,8 +264,8 @@ func makeBundle(at bundle: URL) throws {
     let info: [String: Any] = ["CFBundleIdentifier": label, "CFBundleName": "UC Watchdog",
                               "CFBundleDisplayName": "UC Watchdog", "CFBundleExecutable": "uc-watchdog",
                               "CFBundleIconFile": "AppIcon.icns",
-                              "CFBundlePackageType": "APPL", "CFBundleVersion": "6",
-                              "CFBundleShortVersionString": "3.2", "LSMinimumSystemVersion": "13.0",
+                              "CFBundlePackageType": "APPL", "CFBundleVersion": "7",
+                              "CFBundleShortVersionString": "3.3", "LSMinimumSystemVersion": "13.0",
                               "UCWatchdogAuthor": "wx-ast",
                               "UCWatchdogSourceURL": "https://github.com/wx-ast/uc-watcher",
                               "LSUIElement": true]
@@ -337,7 +338,16 @@ func manage(_ action: String, _ arguments: [String]) throws {
         print("Uninstalled; existing diagnostic logs retained at \(logs.path)")
         return
     }
-    let peer = option("--peer", default: "3047DD83", in: arguments).uppercased()
+    let stored = try WatchConfiguration.load(from: logs)
+    let configured = fm.fileExists(atPath: logs.appendingPathComponent("configuration.json").path)
+    guard arguments.contains("--peer") || configured else {
+        throw WatchError.message("Choose a device in the app, or run peers and install --peer <prefix>")
+    }
+    if let index = arguments.firstIndex(of: "--peer"),
+       index + 1 >= arguments.count || arguments[index + 1].hasPrefix("--") {
+        throw WatchError.message("--peer requires a prefix; use peers to list devices")
+    }
+    let peer = option("--peer", default: stored.peer, in: arguments).uppercased()
     try validatePeer(peer)
     var loginEnabled = true
     if fm.fileExists(atPath: binary.path), !fm.fileExists(atPath: plist.path) {
@@ -361,6 +371,13 @@ func manage(_ action: String, _ arguments: [String]) throws {
     }
     for file in [plist, legacyBinary, app.appendingPathComponent("watchdog.py"), app.appendingPathComponent("install.py")]
         where fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
+    let historyFile = logs.appendingPathComponent("recovery-history.json")
+    if configured, stored.peer != peer, let data = try? Data(contentsOf: historyFile),
+       var history = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], history["peer"] == nil {
+        // Bind legacy pending incidents to their original Mac when changing the selection.
+        history["peer"] = stored.peer
+        try JSONSerialization.data(withJSONObject: history).write(to: historyFile, options: .atomic)
+    }
     try WatchConfiguration(peer: peer, dryRun: arguments.contains("--dry-run")).save(to: logs)
     _ = try command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", bundle.path])
     if loginEnabled { print(try command(binary.path, ["autostart", "on"])) }
@@ -452,7 +469,16 @@ func selfTest() throws {
     guard !policy.shouldStart(running: false, now: now.addingTimeInterval(60)) else {
         throw WatchError.message("Stopped monitor retried")
     }
-    print("18 self-tests passed; no service signals sent")
+    try peerDiscoverySelfTest()
+    let changedHistory = directory.appendingPathComponent("peer-history.json")
+    let originalPeer = Guard(peer: "3047DD83", history: changedHistory, log: { _ in }) {}
+    originalPeer.event("IDS 3047DD83: Device Unavailable", now: 2000)
+    let changedPeer = Guard(peer: "AAAAAAAA", history: changedHistory, log: { _ in }) {}
+    guard originalPeer.pendingIncident != nil, changedPeer.pendingIncident == nil,
+          changedPeer.lastAttempt == originalPeer.lastAttempt else {
+        throw WatchError.message("Peer change must preserve rate limits without inheriting another Mac's incident")
+    }
+    print("23 self-tests passed; no service signals sent")
 }
 
 func previewNotification(_ arguments: [String]) throws {
@@ -486,6 +512,10 @@ do {
     switch arguments.first ?? (Bundle.main.bundleURL.pathExtension == "app" ? "launch" : "help") {
     case "launch": try launchApplication()
     case "monitor": try monitor(arguments)
+    case "peers":
+        let peers = try discoverPeers()
+        if peers.isEmpty { print("No Universal Control devices found in the last 24 hours") }
+        for peer in peers { print("\(peer.title)  last seen: \(peer.lastSeen)") }
     case "menu": try menuBar(arguments)
     case "menu-self-test": try menuSelfTest()
     case "autostart":
@@ -505,7 +535,7 @@ do {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("uc-watchdog-check")
         try recover(Logger(directory), dryRun: true)
     default:
-        print("uc-watchdog monitor|install|uninstall|status|menu|autostart|self-test|check-processes|bundle|preview-notification [--peer 3047DD83] [--dry-run]")
+        print("uc-watchdog monitor|peers|install|uninstall|status|menu|autostart|self-test|check-processes|bundle|preview-notification [--peer PREFIX] [--dry-run]")
     }
 } catch {
     FileHandle.standardError.write(Data("uc-watchdog: \(error)\n".utf8)); exit(1)

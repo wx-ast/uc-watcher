@@ -9,6 +9,7 @@
 - `Sources/UCWatchdog/main.swift` — монитор журнала, ограничения восстановления,
   выбор процессов, установщик приложения и встроенные проверки.
 - `Sources/UCWatchdog/MenuBar.swift` — меню, системный автозапуск и управление процессом монитора.
+- `Sources/UCWatchdog/PeerDiscovery.swift` — поиск IDS-префиксов в журнале и выбор устройства при установке.
 - `Sources/UCWatchdog/RecoveryNotice.swift` — стандартные уведомления macOS через UserNotifications.
 - `Sources/UCWatchdog/Resources/AppIcon.icns` — иконка приложения; исходное изображение в `Assets/AppIcon.png`.
 - `README.md` — сборка, установка, ограничения и управление.

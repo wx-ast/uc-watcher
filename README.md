@@ -7,11 +7,14 @@
 ## Установка
 
 Требуется macOS 13 или новее. Откройте `UC Watchdog.app` на принимающем Mac
-и нажмите **Установить**. Приложение запустится и включит автозапуск при входе.
+и нажмите **Установить**. Выберите Mac из найденных устройств — приложение
+покажет имя или модель и его IDS-префикс. Затем оно запустится и включит автозапуск.
 При первом запуске разрешите уведомления для **UC Watchdog**.
 
-По умолчанию отслеживается Mac с IDS-префиксом `3047DD83`. Для другой пары укажите
-её префикс при установке из командной строки: `install --peer <IDS-префикс>`.
+Список берётся из журнала Universal Control за последние сутки. Если нужного Mac
+нет, включите Universal Control на обоих устройствах, попробуйте перевести
+указатель на другой экран и нажмите **Обновить список**. Иногда macOS скрывает имя;
+тогда отображается модель или только префикс. Отмена выбора ничего не устанавливает.
 
 Чтобы обновить приложение, откройте новую копию и выберите **Обновить**.
 История, журналы, выбранный Mac и настройка автозапуска сохранятся.
@@ -61,6 +64,7 @@ open ".build/UC Watchdog.app"
 ```sh
 .build/release/uc-watchdog self-test
 .build/release/uc-watchdog check-processes
+.build/release/uc-watchdog peers
 .build/release/uc-watchdog monitor --dry-run --duration 30
 ".build/UC Watchdog.app/Contents/MacOS/uc-watchdog" menu-self-test
 ".build/UC Watchdog.app/Contents/MacOS/uc-watchdog" preview-notification
