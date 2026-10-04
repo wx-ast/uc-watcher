@@ -273,7 +273,7 @@ func makeBundle(at bundle: URL) throws {
     let info: [String: Any] = ["CFBundleIdentifier": label, "CFBundleName": "UC Watchdog",
                               "CFBundleDisplayName": "UC Watchdog", "CFBundleExecutable": "uc-watchdog",
                               "CFBundleIconFile": "AppIcon.icns",
-                              "CFBundlePackageType": "APPL", "CFBundleVersion": "9",
+                              "CFBundlePackageType": "APPL", "CFBundleVersion": "10",
                               "CFBundleShortVersionString": "1.0", "LSMinimumSystemVersion": "13.0",
                               "UCWatchdogAuthor": "wx-ast",
                               "UCWatchdogSourceURL": "https://github.com/wx-ast/uc-watcher",

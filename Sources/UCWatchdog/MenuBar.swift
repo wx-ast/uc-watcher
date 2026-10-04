@@ -29,6 +29,12 @@ func installedApplicationURL() -> URL {
         .appendingPathComponent("Library/Application Support/UCWatchdog/UC Watchdog.app")
 }
 
+func installedApplicationOpenArguments(_ application: URL = installedApplicationURL()) -> [String] {
+    // Always enter the monitor explicitly. A quarantined .app can be translocated,
+    // so Bundle.main.bundleURL is not a reliable way to recognize an installed launch.
+    ["-n", "-a", application.path, "--args", "menu"]
+}
+
 func installedMenuIsRunning() throws -> Bool {
     let lock = defaultStateDirectory().appendingPathComponent("menu.lock")
     let fd = open(lock.path, O_RDONLY | O_CLOEXEC)
@@ -45,24 +51,54 @@ func installedMenuIsRunning() throws -> Bool {
 
 func openInstalledApplication(isRunning: () throws -> Bool = installedMenuIsRunning,
                               launch: () throws -> Void = {
-                                  _ = try command("/usr/bin/open", ["-n", installedApplicationURL().path])
+                                  let application = installedApplicationURL()
+                                  let binary = application.appendingPathComponent("Contents/MacOS/uc-watchdog")
+                                  guard FileManager.default.isExecutableFile(atPath: binary.path) else {
+                                      throw WatchError.message(localized("Installed executable is missing or cannot be run: \(binary.path)",
+                                                                        "Установленный исполняемый файл отсутствует или недоступен для запуска: \(binary.path)"))
+                                  }
+                                  _ = try command("/usr/bin/open", installedApplicationOpenArguments(application))
+                              },
+                              refreshRegistration: () throws -> Void = {
+                                  let tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+                                  let path = installedApplicationURL().path
+                                  _ = try command(tool, ["-u", path])
+                                  _ = try command(tool, ["-f", path])
                               },
                               wait: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }) throws {
     // Registering a login item can start the installed copy before we ask LaunchServices to open it.
     if try isRunning() { return }
-    do { try launch() }
-    catch {
+    func waitForMenu() throws -> Bool {
         // A concurrent launch may finish after open reports Resource busy. Require the
         // installed executable and its menu lock, rather than another copy with our bundle ID.
         for delay in [0.0, 0.1, 0.2, 0.5, 1.0, 2.0] {
             wait(delay)
-            if try isRunning() { return }
+            if try isRunning() { return true }
         }
-        throw error
+        return false
+    }
+    do { try launch() }
+    catch {
+        if try waitForMenu() { return }
+        // After an update, LaunchServices can still resolve the previous application.
+        // Refresh only this app's registration and retry once using an explicit app URL.
+        let description = String(describing: error)
+        guard description.range(of: #"NSPOSIXErrorDomain[\s\S]*\bCode=2\b"#,
+                                options: .regularExpression) != nil else { throw error }
+        try refreshRegistration()
+        do { try launch() }
+        catch {
+            if try waitForMenu() { return }
+            throw error
+        }
     }
 }
 
 func installationLaunchSelfTest() throws {
+    let path = URL(fileURLWithPath: "/tmp/UC Watchdog.app")
+    guard installedApplicationOpenArguments(path) == ["-n", "-a", path.path, "--args", "menu"] else {
+        throw WatchError.message("Installed launch must enter menu mode instead of the installer")
+    }
     var launches = 0
     try openInstalledApplication(isRunning: { true }, launch: { launches += 1 }, wait: { _ in })
     guard launches == 0 else { throw WatchError.message("Already-running installed app was launched again") }
@@ -85,6 +121,39 @@ func installationLaunchSelfTest() throws {
     } catch { failure = String(describing: error) }
     guard failure == busy.description, waited < 4 else {
         throw WatchError.message("Launch failure was hidden or wait was not bounded")
+    }
+
+    var registrations = 0
+    var retries = 0
+    let missing = WatchError.message("open: NSPOSIXErrorDomain Code=2 No such file or directory")
+    try openInstalledApplication(isRunning: { false }, launch: {
+        retries += 1
+        if retries == 1 { throw missing }
+    }, refreshRegistration: { registrations += 1 }, wait: { _ in })
+    guard registrations == 1, retries == 2 else {
+        throw WatchError.message("Stale LaunchServices registration was not refreshed")
+    }
+    retries = 0
+    failure = nil
+    do {
+        try openInstalledApplication(isRunning: { false }, launch: {
+            retries += 1; throw missing
+        }, refreshRegistration: {}, wait: { _ in })
+    } catch { failure = String(describing: error) }
+    guard retries == 2, failure == missing.description else {
+        throw WatchError.message("Persistent missing application error was hidden or retried indefinitely")
+    }
+    registrations = 0
+    failure = nil
+    do {
+        try openInstalledApplication(isRunning: { false }, launch: {
+            throw WatchError.message("open: NSPOSIXErrorDomain Code=20 Not a directory")
+        }, refreshRegistration: { registrations += 1 }, wait: { _ in })
+    } catch {
+        failure = String(describing: error)
+    }
+    guard registrations == 0, failure?.contains("Code=20") == true else {
+        throw WatchError.message("Unrelated launch error was hidden or refreshed registration")
     }
 }
 
