@@ -245,6 +245,32 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
     }
 
+    func languageSelectionSelfTest() throws {
+        let defaults = AppLanguage.preferences
+        let original = defaults.object(forKey: "interfaceLanguage")
+        defer {
+            if let original { defaults.set(original, forKey: "interfaceLanguage") }
+            else { defaults.removeObject(forKey: "interfaceLanguage") }
+            defaults.synchronize()
+            rebuildMenu()
+        }
+        for language in [AppLanguage.russian, .english] {
+            guard let menu = item.menu?.item(withTitle: localized("Language", "Язык"))?.submenu,
+                  let index = menu.items.firstIndex(where: { $0.representedObject as? String == language.rawValue }) else {
+                throw WatchError.message("Language menu item missing")
+            }
+            // Dispatch through AppKit, just as a click does; do not call the selector directly.
+            menu.performActionForItem(at: index)
+            let title = localized("Language", "Язык", language: language)
+            guard AppLanguage.current == language,
+                  login.title == localized("Launch at Login", "Запускать при входе", language: language),
+                  let rebuilt = item.menu?.item(withTitle: title)?.submenu,
+                  rebuilt.items.first(where: { $0.state == .on })?.representedObject as? String == language.rawValue else {
+                throw WatchError.message("Language click did not persist or rebuild the menu")
+            }
+        }
+    }
+
     @objc func toggleAutostart() {
         do {
             // A mixed state requires system approval, not another registration attempt.
@@ -364,6 +390,7 @@ func menuSelfTest() throws {
     try peerPickerSelfTest()
     let supervisor = MonitorSupervisor(directory: directory, configuration: WatchConfiguration(dryRun: true), logger: logger)
     let controller = MenuBarController(supervisor: supervisor, logger: logger)
+    try controller.languageSelectionSelfTest()
     guard let languages = controller.item.menu?.item(withTitle: localized("Language", "Язык"))?.submenu,
           languages.items.map({ $0.title }) == ["English", "Русский"],
           languages.items.allSatisfy({ $0.action == #selector(MenuBarController.selectLanguage(_:)) }),
@@ -380,7 +407,7 @@ func menuSelfTest() throws {
             FileHandle.standardError.write(Data("Menu self-test failed: \(error)\n".utf8))
             exit(1)
         }
-        print("Menu self-test passed: stop action, child lifecycle and crash retry; no service signals sent")
+        print("Menu self-test passed: language clicks, stop action, child lifecycle and crash retry; no service signals sent")
         controller.quit()
     }
     controller.run()

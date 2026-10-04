@@ -466,6 +466,11 @@ func selfTest() throws {
           automatic.body.contains("without a watchdog restart") else {
         throw WatchError.message("Language fallback/English notification content failed")
     }
+    if Bundle.main.bundleIdentifier == label {
+        guard AppLanguage.preferences === UserDefaults.standard else {
+            throw WatchError.message("Bundled application must use its standard language preferences")
+        }
+    }
     let configuration = WatchConfiguration(peer: "3047DD83", dryRun: true)
     try configuration.save(to: directory)
     guard try WatchConfiguration.load(from: directory) == configuration else {
