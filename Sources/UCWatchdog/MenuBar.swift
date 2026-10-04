@@ -24,6 +24,52 @@ func defaultStateDirectory() -> URL {
     FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/UCWatchdog")
 }
 
+func installedApplicationURL() -> URL {
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/UCWatchdog/UC Watchdog.app")
+}
+
+func launchApplication(confirm: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }) throws {
+    try requireApplicationBundle()
+    let installed = installedApplicationURL()
+    if Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+        == installed.standardizedFileURL.resolvingSymlinksInPath() {
+        try menuBar([])
+        return
+    }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    let exists = FileManager.default.fileExists(atPath: installed.path)
+    let alert = NSAlert()
+    alert.messageText = exists ? "Universal Control Watcher уже установлен" : "Установить Universal Control Watcher?"
+    alert.informativeText = exists
+        ? "Можно открыть установленное приложение или заменить его этой копией. История и журналы сохранятся."
+        : "Приложение будет установлено для текущего пользователя и запущено. Автозапуск при входе можно отключить в меню."
+    alert.addButton(withTitle: exists ? "Открыть установленное" : "Установить")
+    if exists { alert.addButton(withTitle: "Обновить") }
+    alert.addButton(withTitle: "Отмена")
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    let response = confirm(alert)
+    do {
+        if exists && response == .alertFirstButtonReturn {
+            _ = try command("/usr/bin/open", ["-n", installed.path])
+        } else if (!exists && response == .alertFirstButtonReturn) || (exists && response == .alertSecondButtonReturn) {
+            var arguments: [String] = []
+            if exists {
+                let configuration = try WatchConfiguration.load(from: defaultStateDirectory())
+                arguments = ["--peer", configuration.peer]
+                if configuration.dryRun { arguments.append("--dry-run") }
+            }
+            try manage("install", arguments)
+        }
+    } catch {
+        let failure = NSAlert()
+        failure.messageText = "Не удалось запустить приложение"
+        failure.informativeText = String(describing: error)
+        failure.runModal()
+        throw error
+    }
+}
+
 func requireApplicationBundle() throws {
     guard Bundle.main.bundleIdentifier == label, Bundle.main.bundleURL.pathExtension == "app" else {
         throw WatchError.message("This command must run from UC Watchdog.app")
@@ -116,7 +162,6 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let heading = NSMenuItem(title: "Universal Control Watcher", action: nil, keyEquivalent: "")
     let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let login = NSMenuItem(title: "Запускать при входе", action: #selector(toggleAutostart), keyEquivalent: "")
-    let toggle = NSMenuItem(title: "", action: #selector(toggleMonitor), keyEquivalent: "")
     var timer: Timer?
 
     init(supervisor: MonitorSupervisor, logger: Logger) {
@@ -135,7 +180,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status.isEnabled = false
         menu.addItem(status)
         menu.addItem(.separator())
-        for entry in [login, toggle,
+        for entry in [login,
                       NSMenuItem(title: "Открыть журнал", action: #selector(openLog), keyEquivalent: ""),
                       NSMenuItem(title: "Показать приложение в Finder", action: #selector(revealApp), keyEquivalent: ""),
                       NSMenuItem(title: "Настройки объектов входа…", action: #selector(openLoginSettings), keyEquivalent: "")] {
@@ -147,7 +192,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         about.target = self; menu.addItem(about)
         let uninstall = NSMenuItem(title: "Удалить приложение…", action: #selector(uninstall), keyEquivalent: "")
         uninstall.target = self; menu.addItem(uninstall)
-        let quit = NSMenuItem(title: "Завершить UC Watchdog", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Остановить", action: #selector(quit), keyEquivalent: "q")
         quit.target = self; menu.addItem(quit)
         item.menu = menu
         refresh()
@@ -164,7 +209,6 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status.title = supervisor.isRunning
             ? (supervisor.configuration.dryRun ? "Только наблюдение" : "Активен")
             : (supervisor.policy.wanted ? "Перезапускается…" : "Остановлен")
-        toggle.title = supervisor.policy.wanted ? "Остановить сейчас" : "Запустить монитор"
         login.state = SMAppService.mainApp.status == .enabled ? .on
             : (SMAppService.mainApp.status == .requiresApproval ? .mixed : .off)
         item.button?.appearsDisabled = !supervisor.isRunning
@@ -181,11 +225,6 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if SMAppService.mainApp.status == .requiresApproval { openLoginSettings() }
             refresh()
         } catch { showError(error) }
-    }
-
-    @objc func toggleMonitor() {
-        if supervisor.policy.wanted { supervisor.stop() } else { supervisor.start() }
-        refresh()
     }
 
     @objc func openLog() {
@@ -281,6 +320,18 @@ func menuSelfTest() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("uc-watchdog-menu-test-\(UUID().uuidString)")
     let logger = try Logger(directory)
     NSApplication.shared.setActivationPolicy(.accessory)
+    // Opening a distributed copy must not install or start anything after Cancel.
+    if Bundle.main.bundleURL.standardizedFileURL != installedApplicationURL().standardizedFileURL {
+        let registration = SMAppService.mainApp.status
+        var offeredCancellation = false
+        try launchApplication { alert in
+            offeredCancellation = alert.buttons.last?.title == "Отмена"
+            return alert.buttons.count == 3 ? .alertThirdButtonReturn : .alertSecondButtonReturn
+        }
+        guard offeredCancellation, SMAppService.mainApp.status == registration else {
+            throw WatchError.message("Startup cancellation changed autostart")
+        }
+    }
     let supervisor = MonitorSupervisor(directory: directory, configuration: WatchConfiguration(dryRun: true), logger: logger)
     let controller = MenuBarController(supervisor: supervisor, logger: logger)
     NSApplication.shared.delegate = controller
@@ -292,24 +343,25 @@ func menuSelfTest() throws {
             FileHandle.standardError.write(Data("Menu self-test failed: \(error)\n".utf8))
             exit(1)
         }
-        print("Menu self-test passed: status item, stop/resume and crash retry; no service signals sent")
-        exit(0)
+        print("Menu self-test passed: stop action, child lifecycle and crash retry; no service signals sent")
+        controller.quit()
     }
     controller.run()
     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-        guard supervisor.isRunning, controller.item.menu?.items.count == 12,
-              controller.toggle.title == "Остановить сейчас" else { finish("Initial menu/monitor state"); return }
-        controller.toggleMonitor()
+        guard supervisor.isRunning,
+              controller.item.menu?.item(withTitle: "Остановить")?.action == #selector(MenuBarController.quit)
+            else { finish("Initial menu/monitor state"); return }
+        supervisor.stop(); controller.refresh()
         guard !supervisor.isRunning, !supervisor.policy.wanted,
-              controller.toggle.title == "Запустить монитор" else { finish("Stop action"); return }
-        controller.toggleMonitor()
+              controller.status.title == "Остановлен" else { finish("Stop child"); return }
+        supervisor.start(); controller.refresh()
         guard supervisor.isRunning else { finish("Resume action"); return }
         // Terminate only our dry-run child to simulate a crash.
         supervisor.process?.terminate()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             guard !supervisor.isRunning, supervisor.policy.wanted,
                   supervisor.policy.nextStart.timeIntervalSinceNow > 25 else { finish("Crash retry throttle"); return }
-            controller.toggleMonitor()
+            supervisor.stop()
             supervisor.tick()
             guard !supervisor.isRunning, !supervisor.policy.wanted else { finish("Stopped monitor restarted"); return }
             finish(nil)

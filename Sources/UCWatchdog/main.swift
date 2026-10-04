@@ -263,8 +263,8 @@ func makeBundle(at bundle: URL) throws {
     let info: [String: Any] = ["CFBundleIdentifier": label, "CFBundleName": "UC Watchdog",
                               "CFBundleDisplayName": "UC Watchdog", "CFBundleExecutable": "uc-watchdog",
                               "CFBundleIconFile": "AppIcon.icns",
-                              "CFBundlePackageType": "APPL", "CFBundleVersion": "5",
-                              "CFBundleShortVersionString": "3.1", "LSMinimumSystemVersion": "13.0",
+                              "CFBundlePackageType": "APPL", "CFBundleVersion": "6",
+                              "CFBundleShortVersionString": "3.2", "LSMinimumSystemVersion": "13.0",
                               "UCWatchdogAuthor": "wx-ast",
                               "UCWatchdogSourceURL": "https://github.com/wx-ast/uc-watcher",
                               "LSUIElement": true]
@@ -304,7 +304,7 @@ func stopInstalledProcesses(_ binary: URL) throws {
 func manage(_ action: String, _ arguments: [String]) throws {
     let home = FileManager.default.homeDirectoryForCurrentUser
     let app = home.appendingPathComponent("Library/Application Support/UCWatchdog")
-    let bundle = app.appendingPathComponent("UC Watchdog.app")
+    let bundle = installedApplicationURL()
     let binary = bundle.appendingPathComponent("Contents/MacOS/uc-watchdog")
     let legacyBinary = app.appendingPathComponent("uc-watchdog")
     let logs = defaultStateDirectory()
@@ -364,7 +364,9 @@ func manage(_ action: String, _ arguments: [String]) throws {
     try WatchConfiguration(peer: peer, dryRun: arguments.contains("--dry-run")).save(to: logs)
     _ = try command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", bundle.path])
     if loginEnabled { print(try command(binary.path, ["autostart", "on"])) }
-    _ = try command("/usr/bin/open", [bundle.path])
+    // A distributed copy may still be running with the same bundle ID.
+    // Force opening the installed path; the menu lock prevents duplicate instances.
+    _ = try command("/usr/bin/open", ["-n", bundle.path])
     print("Installed UC Watchdog menu bar app; mode: \(arguments.contains("--dry-run") ? "observation" : "automatic recovery")")
     print("Log: \(logs.appendingPathComponent("watchdog.log").path)")
 }
@@ -481,7 +483,8 @@ func previewNotification(_ arguments: [String]) throws {
 
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    switch arguments.first ?? (Bundle.main.bundleURL.pathExtension == "app" ? "menu" : "help") {
+    switch arguments.first ?? (Bundle.main.bundleURL.pathExtension == "app" ? "launch" : "help") {
+    case "launch": try launchApplication()
     case "monitor": try monitor(arguments)
     case "menu": try menuBar(arguments)
     case "menu-self-test": try menuSelfTest()
